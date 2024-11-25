@@ -493,3 +493,194 @@ ValidAudience = jwtSettings?.Audience ?? "DefaultAudience"
 ---
 
 Remember: When using the Options Pattern within dependency injection configuration, you might need both immediate access to values (using `Get<T>`) and dependency injection setup (using `Configure<T>`) for different parts of your application.
+
+
+
+# Options Pattern Interfaces in ASP.NET Core
+
+## Interface Overview
+
+```mermaid
+graph TB
+    subgraph "Options Interfaces"
+        A[IOptions] -->|Singleton Cached| D[Configuration]
+        B[IOptionsSnapshot] -->|Scoped Per Request| D
+        C[IOptionsMonitor] -->|Real-time Updates| D
+    end
+    
+    style A fill:#f9d
+    style B fill:#afd
+    style C fill:#daf
+    style D fill:#eee
+```
+
+## Comparison Table
+
+| Interface | Lifetime | Update Behavior | Service Compatibility | Use Case |
+|-----------|----------|-----------------|----------------------|-----------|
+| `IOptions<T>` | Singleton | Once at startup | All services | Static configuration |
+| `IOptionsSnapshot<T>` | Scoped | Per request | Scoped, Transient | Request-specific config |
+| `IOptionsMonitor<T>` | Singleton | Real-time | All services | Dynamic configuration |
+
+## Detailed Interface Descriptions
+
+### 1. IOptions<TOptions>
+```csharp
+public class MyService
+{
+    private readonly TOptions _options;
+
+    public MyService(IOptions<TOptions> options)
+    {
+        _options = options.Value;
+    }
+}
+```
+
+**Characteristics:**
+- ✅ Most commonly used (99.99% cases)
+- ✅ Singleton registration
+- ✅ Can be used with any service lifetime
+- ❌ No configuration reloading
+- ✅ Best performance (single read)
+
+### 2. IOptionsSnapshot<TOptions>
+```csharp
+public class MyService
+{
+    private readonly TOptions _options;
+
+    public MyService(IOptionsSnapshot<TOptions> options)
+    {
+        _options = options.Value;
+    }
+}
+```
+
+**Characteristics:**
+- ✅ Reloads configuration per request
+- ✅ Scoped registration
+- ✅ Works with scoped and transient services
+- ❌ Cannot be used with singleton services
+- ✅ Consistent within a request
+
+### 3. IOptionsMonitor<TOptions>
+```csharp
+public class MyService
+{
+    private readonly TOptions _options;
+
+    public MyService(IOptionsMonitor<TOptions> options)
+    {
+        _options = options.CurrentValue;
+        options.OnChange(changedOptions =>
+        {
+            // Handle configuration changes
+        });
+    }
+}
+```
+
+**Characteristics:**
+- ✅ Real-time configuration updates
+- ✅ Singleton registration
+- ✅ Can be used with any service lifetime
+- ✅ Supports change notifications
+- ✅ Best for dynamic configurations
+
+## Service Lifetime Compatibility
+
+```mermaid
+graph TD
+    A[Service Lifetimes] --> B[Singleton]
+    A --> C[Scoped]
+    A --> D[Transient]
+    
+    B --> E[IOptions]
+    B --> F[IOptionsMonitor]
+    
+    C --> G[IOptions]
+    C --> H[IOptionsSnapshot]
+    C --> I[IOptionsMonitor]
+    
+    D --> J[IOptions]
+    D --> K[IOptionsSnapshot]
+    D --> L[IOptionsMonitor]
+```
+
+## Best Practices
+
+### When to Use Each Interface
+
+| Scenario | Recommended Interface | Reason |
+|----------|---------------------|---------|
+| Static Configuration | IOptions | Best performance, simplest usage |
+| Per-Request Settings | IOptionsSnapshot | Consistent within request |
+| Dynamic Updates | IOptionsMonitor | Real-time configuration changes |
+
+### Usage Guidelines
+
+1. **IOptions<T>**
+   - Default choice for most scenarios
+   - Use when configuration is static
+   - Best performance option
+
+2. **IOptionsSnapshot<T>**
+   - Use when values might change between requests
+   - Good for request-scoped configuration
+   - Avoid in singleton services
+
+3. **IOptionsMonitor<T>**
+   - Use when real-time updates are needed
+   - Good for long-running services
+   - Use when monitoring configuration changes
+
+## Implementation Examples
+
+### Static Configuration
+```csharp
+public class StaticConfigService
+{
+    private readonly MyOptions _options;
+
+    public StaticConfigService(IOptions<MyOptions> options)
+    {
+        _options = options.Value;
+    }
+}
+```
+
+### Request-Scoped Configuration
+```csharp
+public class RequestScopedService
+{
+    private readonly MyOptions _options;
+
+    public RequestScopedService(IOptionsSnapshot<MyOptions> options)
+    {
+        _options = options.Value;
+    }
+}
+```
+
+### Dynamic Configuration
+```csharp
+public class DynamicConfigService
+{
+    private MyOptions _options;
+
+    public DynamicConfigService(IOptionsMonitor<MyOptions> options)
+    {
+        _options = options.CurrentValue;
+        options.OnChange(changed =>
+        {
+            _options = changed;
+            OnConfigurationChanged();
+        });
+    }
+}
+```
+
+---
+
+Remember to choose the appropriate interface based on your specific needs regarding configuration updates and service lifetime requirements.
