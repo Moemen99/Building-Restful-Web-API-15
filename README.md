@@ -861,3 +861,199 @@ graph TB
 ---
 
 Remember: For most applications, `IOptions<T>` is sufficient. Only use `IOptionsSnapshot` or `IOptionsMonitor` when you specifically need their dynamic update capabilities.
+
+
+
+# Implementing Options Pattern in JWT Provider
+
+## Controller Implementation
+```csharp
+[Route("[controller]")]
+[ApiController]
+public class AuthController : ControllerBase
+{
+    private readonly IAuthService _authService;
+
+    public AuthController(IAuthService authService)
+    {
+        _authService = authService;
+    }
+
+    [HttpPost("")]
+    public async Task<IActionResult> LoginAsync(
+        LoginRequest request, 
+        CancellationToken cancellationToken)
+    {
+        var authResult = await _authService.GetTokenAsync(
+            request.Email,
+            request.password,
+            cancellationToken);
+
+        return authResult is null 
+            ? BadRequest("Invalid email or password")
+            : Ok(authResult);
+    }
+}
+```
+
+## JWT Provider Evolution
+
+### Before (Hardcoded Values)
+```csharp
+public class JwtProvider : IJwtProvider
+{
+    private readonly IOptions<JwtOptions> _options;
+
+    public JwtProvider(IOptions<JwtOptions> options)
+    {
+        _options = options;
+    }
+
+    public (string token, int expiresIn) GenerateToken(ApplicationUser user)
+    {
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id),
+            new Claim(JwtRegisteredClaimNames.Email, user.Email!),
+            new Claim(JwtRegisteredClaimNames.GivenName, user.FirstName),
+            new Claim(JwtRegisteredClaimNames.FamilyName, user.LastName),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        };
+
+        var symmetricSecurityKey = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes("J7MfAb4WcAIMkkigVtIepIILOVJEjAcB"));
+
+        var signingCredentials = new SigningCredentials(
+            symmetricSecurityKey, 
+            SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: "SurveyBasketApp",
+            audience: "SurveyBasket users",
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(expiresIn),
+            signingCredentials: signingCredentials);
+
+        return (
+            token: new JwtSecurityTokenHandler().WriteToken(token),
+            expiresIn: expiresIn * 60);
+    }
+}
+```
+
+### After (Using Options Pattern)
+```csharp
+public class JwtProvider : IJwtProvider
+{
+    private readonly JwtOptions _options;
+
+    public JwtProvider(IOptions<JwtOptions> options)
+    {
+        _options = options.Value;
+    }
+
+    public (string token, int expiresIn) GenerateToken(ApplicationUser user)
+    {
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id),
+            new Claim(JwtRegisteredClaimNames.Email, user.Email!),
+            new Claim(JwtRegisteredClaimNames.GivenName, user.FirstName),
+            new Claim(JwtRegisteredClaimNames.FamilyName, user.LastName),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        };
+
+        var symmetricSecurityKey = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(_options.Key));
+
+        var signingCredentials = new SigningCredentials(
+            symmetricSecurityKey, 
+            SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: _options.Issuer,
+            audience: _options.Audience,
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(_options.ExpiryMinutes),
+            signingCredentials: signingCredentials);
+
+        return (
+            token: new JwtSecurityTokenHandler().WriteToken(token),
+            expiresIn: _options.ExpiryMinutes * 60);
+    }
+}
+```
+
+## Key Changes
+
+```mermaid
+graph TD
+    A[Hardcoded Values] --> B[Options Pattern]
+    B --> C[Configuration]
+    
+    subgraph "Changes Made"
+        D[Inject IOptions]
+        E[Access Via options.Value]
+        F[Use Configuration Values]
+    end
+    
+    B --> D
+    B --> E
+    B --> F
+```
+
+## Implementation Benefits
+
+| Aspect | Before | After |
+|--------|---------|--------|
+| Configuration | Hardcoded | External |
+| Maintainability | Low | High |
+| Security | Less Secure | More Secure |
+| Flexibility | Static | Dynamic |
+
+## Best Practices
+
+1. **Options Access**
+   - Store options.Value in private readonly field
+   - Access once during construction
+   - Use strongly typed properties
+
+2. **Security**
+   - Keep sensitive data in user secrets/environment variables
+   - Never hardcode security keys
+   - Use configuration for all JWT parameters
+
+3. **Implementation**
+   - Use dependency injection
+   - Validate options at startup
+   - Handle missing values gracefully
+
+## Validation Checks
+
+```csharp
+public JwtProvider(IOptions<JwtOptions> options)
+{
+    _options = options.Value ?? throw new ArgumentNullException(nameof(options));
+    
+    if (string.IsNullOrEmpty(_options.Key))
+        throw new InvalidOperationException("JWT Key is not configured");
+}
+```
+
+## Configuration Flow
+
+```mermaid
+graph LR
+    A[appsettings.json] --> B[JwtOptions]
+    B --> C[JwtProvider]
+    C --> D[Token Generation]
+    
+    style A fill:#f9d
+    style B fill:#afd
+    style C fill:#daf
+    style D fill:#fda
+```
+
+---
+
+The implementation shows how to move from hardcoded values to a configuration-based approach using the Options Pattern, improving security and maintainability.
