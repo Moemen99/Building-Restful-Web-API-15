@@ -1057,3 +1057,212 @@ graph LR
 ---
 
 The implementation shows how to move from hardcoded values to a configuration-based approach using the Options Pattern, improving security and maintainability.
+
+
+
+# Options Pattern Validation in ASP.NET Core
+
+## Problem Statement
+Invalid configuration values can cause runtime issues:
+```json
+{
+    "Jwt": {
+        "Key": "",
+        "Issuer": "SurveyBasketsApp",
+        "Audience": "SurveyBasketsApp users",
+        "ExpiryMinutes": "-30"  // Invalid value!
+    }
+}
+```
+
+## Implementation
+
+### JwtOptions with Validation
+```csharp
+public class JwtOptions
+{
+    public static string SectionName = "Jwt";
+
+    [Required]
+    public string Key { get; init; } = string.Empty;
+
+    [Required]
+    public string Issuer { get; init; } = string.Empty;
+
+    [Required]
+    public string Audience { get; init; } = string.Empty;
+
+    [Range(1, int.MaxValue, ErrorMessage = "Invalid Expiry Minutes")]
+    public int ExpiryMinutes { get; init; }
+}
+```
+
+### Updated Dependency Injection Configuration
+```csharp
+private static IServiceCollection AddAuthConfig(
+    this IServiceCollection services,
+    IConfiguration configuration)
+{
+    // Add Identity with Entity Framework stores
+    services.AddIdentity<ApplicationUser, IdentityRole>()
+            .AddEntityFrameworkStores<ApplicationDbContext>();
+
+    // Add JWT Provider service
+    services.AddSingleton<IJwtProvider, JwtProvider>();
+
+    // Configure and validate JWT options
+    services.AddOptions<JwtOptions>()
+           .BindConfiguration(JwtOptions.SectionName)
+           .ValidateDataAnnotations()
+           .ValidateOnStart();
+
+    // Get JWT settings for authentication configuration
+    var jwtSettings = configuration
+        .GetSection(JwtOptions.SectionName)
+        .Get<JwtOptions>();
+
+    if (jwtSettings is null)
+    {
+        throw new InvalidOperationException("JWT settings are not configured");
+    }
+
+    // Configure Authentication
+    services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        options.SaveToken = true;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(jwtSettings.Key)),
+            ValidIssuer = jwtSettings.Issuer,
+            ValidAudience = jwtSettings.Audience
+        };
+    });
+
+    return services;
+}
+```
+
+## Validation Flow
+
+```mermaid
+graph TD
+    A[Configuration] --> B[Options Binding]
+    B --> C{Validation}
+    C -->|Valid| D[Application Starts]
+    C -->|Invalid| E[Startup Failed]
+    
+    subgraph "Validation Steps"
+        F[Data Annotations]
+        G[Startup Checks]
+    end
+    
+    C --> F
+    C --> G
+```
+
+## Validation Scenarios
+
+| Scenario | Configuration | Result | Reason |
+|----------|--------------|--------|---------|
+| Missing Value | `"ExpiryMinutes": ""` | ❌ Failed | Required field |
+| Negative Value | `"ExpiryMinutes": "-30"` | ❌ Failed | Range validation |
+| Valid Value | `"ExpiryMinutes": "30"` | ✅ Success | Meets criteria |
+
+## Validation Methods
+
+1. **ValidateDataAnnotations()**
+   - Validates Data Annotation attributes
+   - Runs during options resolution
+   - Throws exceptions for invalid values
+
+2. **ValidateOnStart()**
+   - Validates during application startup
+   - Prevents application from starting if invalid
+   - Provides clear error messages in console
+
+## Best Practices
+
+### Data Annotations
+```csharp
+public class JwtOptions
+{
+    [Required(ErrorMessage = "JWT Key is required")]
+    public string Key { get; init; }
+
+    [Required]
+    [MinLength(1)]
+    public string Issuer { get; init; }
+
+    [Required]
+    [MinLength(1)]
+    public string Audience { get; init; }
+
+    [Range(1, int.MaxValue)]
+    [Required]
+    public int ExpiryMinutes { get; init; }
+}
+```
+
+### Validation Configuration
+```csharp
+services.AddOptions<JwtOptions>()
+    .BindConfiguration(JwtOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+## Error Handling Approaches
+
+1. **Runtime Validation**
+   ```csharp
+   // Throws exceptions during runtime
+   services.AddOptions<JwtOptions>()
+       .ValidateDataAnnotations();
+   ```
+
+2. **Startup Validation**
+   ```csharp
+   // Prevents application startup
+   services.AddOptions<JwtOptions>()
+       .ValidateDataAnnotations()
+       .ValidateOnStart();
+   ```
+
+## Common Validation Rules
+
+| Attribute | Use Case | Example |
+|-----------|----------|---------|
+| [Required] | Mandatory fields | Key, Issuer |
+| [Range] | Numeric constraints | ExpiryMinutes |
+| [MinLength] | String length | Issuer, Audience |
+| [RegularExpression] | Pattern matching | Custom formats |
+
+## Valid Configuration Example
+```json
+{
+    "Jwt": {
+        "Key": "your-secure-key",
+        "Issuer": "SurveyBasketsApp",
+        "Audience": "SurveyBasketsApp users",
+        "ExpiryMinutes": "30"
+    }
+}
+```
+
+---
+
+Remember:
+- Always validate configuration at startup
+- Use appropriate Data Annotations
+- Provide meaningful error messages
+- Consider business rules in validation
