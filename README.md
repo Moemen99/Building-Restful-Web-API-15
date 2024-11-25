@@ -160,3 +160,175 @@ public class Service
 ---
 
 The Options Pattern is a powerful feature in .NET that promotes clean, maintainable, and type-safe configuration access. It's particularly useful for large applications with multiple configuration groups.
+
+
+
+# Implementing the Options Pattern with JWT Configuration
+
+## Setting Up the Options Class
+
+### JwtOptions Class
+```csharp
+public class JwtOptions
+{
+    public static string SectionName = "Jwt";  // For configuration binding
+
+    public string Key { get; set; } = string.Empty;
+    public string Issuer { get; set; } = string.Empty;
+    public string Audience { get; set; } = string.Empty;
+    public int ExpiryMinutes { get; set; }
+}
+```
+
+## Configuration in appsettings.json
+```json
+{
+  "Jwt": {
+    "Key": "",
+    "Issuer": "SurveyBasketApp",
+    "Audience": "SurveyBasketApp users",
+    "ExpiryMinutes": 30
+  }
+}
+```
+
+## Registering Options with Dependency Injection
+
+### Methods for Section Name Definition
+1. **Using Static Property**
+   ```csharp
+   services.Configure<JwtOptions>(
+       configuration.GetSection(JwtOptions.SectionName));
+   ```
+
+2. **Using Class Name (Alternative)**
+   ```csharp
+   services.Configure<JwtOptions>(
+       configuration.GetSection(nameof(JwtOptions)));
+   ```
+
+### Complete Authentication Configuration
+```csharp
+private static IServiceCollection AddAuthConfig(
+    this IServiceCollection services,
+    IConfiguration configuration)
+{
+    // Register JWT Options
+    services.Configure<JwtOptions>(
+        configuration.GetSection(JwtOptions.SectionName));
+
+    // Register other services
+    services.AddSingleton<IJwtProvider, JwtProvider>();
+    
+    services.AddIdentity<ApplicationUser, IdentityRole>()
+            .AddEntityFrameworkStores<ApplicationDbContext>();
+
+    services.AddAuthentication(options => 
+    {
+        options.DefaultAuthenticateScheme = 
+            JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = 
+            JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(o =>
+    {
+        o.SaveToken = true;
+        o.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(configuration["Jwt:Key"]!)),
+            ValidIssuer = configuration["Jwt:Issuer"],
+            ValidAudience = configuration["Jwt:Audience"]
+        };
+    });
+
+    return services;
+}
+```
+
+## Using Options in Controllers
+
+```csharp
+public class AuthController : ControllerBase
+{
+    private readonly JwtOptions _jwtOptions;
+
+    public AuthController(IOptions<JwtOptions> jwtOptions)
+    {
+        _jwtOptions = jwtOptions.Value;
+    }
+
+    [HttpGet("Test")]
+    public IActionResult Test()
+    {
+        return Ok(_jwtOptions.Audience);
+    }
+}
+```
+
+## Configuration Flow
+
+```mermaid
+graph LR
+    A[appsettings.json] --> B[Configure<JwtOptions>]
+    B --> C[Dependency Injection]
+    C --> D[Controller/Service]
+    D --> E[Strongly Typed Access]
+    
+    style A fill:#f9d
+    style B fill:#afd
+    style C fill:#daf
+    style D fill:#fda
+    style E fill:#adf
+```
+
+## Implementation Steps
+
+1. **Create Options Class**
+   - Define properties matching configuration section
+   - Add static SectionName property
+   - Ensure property types match configuration values
+
+2. **Register with Services**
+   - Use `Configure<T>` method
+   - Specify correct configuration section
+   - Add before using the options
+
+3. **Inject and Use**
+   - Inject `IOptions<JwtOptions>`
+   - Access through `.Value` property
+   - Use strongly-typed properties
+
+## Best Practices
+
+| Practice | Description |
+|----------|-------------|
+| Section Naming | Use consistent naming between JSON and code |
+| Static Section Name | Define section name in options class |
+| Property Types | Match configuration value types exactly |
+| Validation | Add data annotations if needed |
+
+## Common Pitfalls to Avoid
+
+1. **Configuration Binding**
+   - Ensure section names match exactly
+   - Register options before using them
+   - Check property name casing
+
+2. **Dependency Injection**
+   - Always use IOptions<T> in constructors
+   - Don't forget to call Configure<T>
+   - Register in correct order
+
+3. **Type Matching**
+   - Ensure property types match JSON values
+   - Handle nullable properties appropriately
+   - Consider type conversion needs
+
+---
+
+The Options Pattern requires proper setup in both the configuration and dependency injection to work correctly. The key step is registering the options with the correct configuration section using `Configure<T>`.
