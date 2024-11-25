@@ -332,3 +332,164 @@ graph LR
 ---
 
 The Options Pattern requires proper setup in both the configuration and dependency injection to work correctly. The key step is registering the options with the correct configuration section using `Configure<T>`.
+
+
+
+
+# Using JWT Options in Dependency Injection Configuration
+
+## Implementation Overview
+
+```mermaid
+graph TD
+    A[Configure JwtOptions] --> B[Get JWT Settings]
+    B --> C[Configure Authentication]
+    C --> D[Configure JWT Bearer]
+    
+    style A fill:#f9d
+    style B fill:#afd
+    style C fill:#daf
+    style D fill:#fda
+```
+
+## Complete Implementation
+
+```csharp
+private static IServiceCollection AddAuthConfig(
+    this IServiceCollection services,
+    IConfiguration configuration)
+{
+    // Step 1: Add Identity
+    services.AddIdentity<ApplicationUser, IdentityRole>()
+            .AddEntityFrameworkStores<ApplicationDbContext>();
+
+    // Step 2: Register JWT Provider
+    services.AddSingleton<IJwtProvider, JwtProvider>();
+
+    // Step 3: Configure Options Pattern
+    services.Configure<JwtOptions>(
+        configuration.GetSection(JwtOptions.SectionName));
+
+    // Step 4: Get JWT Settings for immediate use
+    var jwtSettings = configuration
+        .GetSection(JwtOptions.SectionName)
+        .Get<JwtOptions>();
+
+    // Step 5: Configure Authentication with JWT Bearer
+    services.AddAuthentication(options => 
+    {
+        options.DefaultAuthenticateScheme = 
+            JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = 
+            JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(o =>
+    {
+        o.SaveToken = true;
+        o.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(jwtSettings?.Key!)),
+            ValidIssuer = jwtSettings?.Issuer,
+            ValidAudience = jwtSettings?.Audience
+        };
+    });
+
+    return services;
+}
+```
+
+## Key Steps Breakdown
+
+| Step | Purpose | Code |
+|------|---------|------|
+| Configure Options | Register options with DI | `services.Configure<JwtOptions>(...)` |
+| Get Settings | Immediate access to values | `configuration.GetSection(...).Get<JwtOptions>()` |
+| Use Settings | Configure JWT parameters | `jwtSettings?.Key`, `jwtSettings?.Issuer`, etc. |
+
+## Different Approaches to Access Options
+
+### 1. Immediate Configuration Access
+```csharp
+var jwtSettings = configuration
+    .GetSection(JwtOptions.SectionName)
+    .Get<JwtOptions>();
+```
+
+### 2. Dependency Injection (For Services/Controllers)
+```csharp
+private readonly JwtOptions _jwtOptions;
+
+public MyClass(IOptions<JwtOptions> options)
+{
+    _jwtOptions = options.Value;
+}
+```
+
+## Best Practices
+
+1. **Null Checking**
+   - Use null conditional operator (`?.`) when accessing settings
+   - Provide default values where appropriate
+   - Validate settings during startup
+
+2. **Configuration Order**
+   ```csharp
+   // Correct Order
+   services.Configure<JwtOptions>(...);  // First configure
+   var settings = configuration.Get<JwtOptions>();  // Then get
+   ```
+
+3. **Error Handling**
+   - Check for null settings
+   - Validate required values
+   - Handle missing configuration gracefully
+
+## Common Patterns
+
+### Configuration Validation
+```csharp
+if (jwtSettings?.Key is null)
+{
+    throw new InvalidOperationException("JWT Key is not configured");
+}
+```
+
+### Default Values
+```csharp
+ValidIssuer = jwtSettings?.Issuer ?? "DefaultIssuer",
+ValidAudience = jwtSettings?.Audience ?? "DefaultAudience"
+```
+
+## Security Considerations
+
+| Consideration | Recommendation |
+|---------------|----------------|
+| Key Storage | Use secrets.json or environment variables |
+| Validation | Always validate settings at startup |
+| Defaults | Avoid hardcoding sensitive defaults |
+
+## Configuration Flow
+
+1. **Registration**
+   - Register options with services
+   - Configure section binding
+   - Set up DI container
+
+2. **Access**
+   - Get configuration section
+   - Convert to strongly-typed object
+   - Use in authentication setup
+
+3. **Usage**
+   - Configure JWT parameters
+   - Set up authentication
+   - Apply settings
+
+---
+
+Remember: When using the Options Pattern within dependency injection configuration, you might need both immediate access to values (using `Get<T>`) and dependency injection setup (using `Configure<T>`) for different parts of your application.
