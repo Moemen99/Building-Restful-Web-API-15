@@ -684,3 +684,180 @@ public class DynamicConfigService
 ---
 
 Remember to choose the appropriate interface based on your specific needs regarding configuration updates and service lifetime requirements.
+
+
+
+
+# Options Pattern Interfaces - Practical Implementation Examples
+
+## Controller Implementation
+
+```csharp
+[Route("[controller]")]
+[ApiController]
+public class AuthController : ControllerBase
+{
+    private readonly IAuthService _authService;
+    private readonly IOptions<JwtOptions> _options;
+    private readonly IOptionsSnapshot<JwtOptions> _snapshotOptions;
+    private readonly IOptionsMonitor<JwtOptions> _monitorOptions;
+
+    public AuthController(
+        IAuthService authService,
+        IOptions<JwtOptions> options,
+        IOptionsSnapshot<JwtOptions> snapshotOptions,
+        IOptionsMonitor<JwtOptions> monitorOptions)
+    {
+        _authService = authService;
+        _options = options;
+        _snapshotOptions = snapshotOptions;
+        _monitorOptions = monitorOptions;
+    }
+
+    [HttpGet("Test")]
+    public IActionResult Test()
+    {
+        var values = new
+        {
+            iOptionsValue = _options.Value.ExpiryMinutes,
+            iOptionsSnapShotValue = _snapshotOptions.Value.ExpiryMinutes,
+            iOptionsMonitorValue = _monitorOptions.CurrentValue.ExpiryMinutes
+        };
+
+        // Simulate delay to allow configuration changes
+        Thread.Sleep(5000);
+
+        var values2 = new
+        {
+            iOptionsValue = _options.Value.ExpiryMinutes,
+            iOptionsSnapShotValue = _snapshotOptions.Value.ExpiryMinutes,
+            iOptionsMonitorValue = _monitorOptions.CurrentValue.ExpiryMinutes
+        };
+
+        return Ok(new { values, values2 });
+    }
+}
+```
+
+## Behavior Analysis
+
+### Scenario 1: No Configuration Changes
+```json
+{
+    "values": {
+        "iOptionsValue": 30,
+        "iOptionsSnapShotValue": 30,
+        "iOptionsMonitorValue": 30
+    },
+    "values2": {
+        "iOptionsValue": 30,
+        "iOptionsSnapShotValue": 30,
+        "iOptionsMonitorValue": 30
+    }
+}
+```
+
+### Scenario 2: Value Changed to 60
+```json
+{
+    "values": {
+        "iOptionsValue": 30,        // Remains unchanged without restart
+        "iOptionsSnapShotValue": 60, // Updated with new request
+        "iOptionsMonitorValue": 60   // Updated with change
+    },
+    "values2": {
+        "iOptionsValue": 30,
+        "iOptionsSnapShotValue": 60,
+        "iOptionsMonitorValue": 60
+    }
+}
+```
+
+### Scenario 3: Mid-Request Change (120 → 180)
+```json
+{
+    "values": {
+        "iOptionsValue": 30,         // Still unchanged
+        "iOptionsSnapShotValue": 120, // Value at request start
+        "iOptionsMonitorValue": 120   // Initial value
+    },
+    "values2": {
+        "iOptionsValue": 30,         // Requires restart
+        "iOptionsSnapShotValue": 120, // Same throughout request
+        "iOptionsMonitorValue": 180   // Updated mid-request
+    }
+}
+```
+
+## Behavior Comparison
+
+```mermaid
+graph TB
+    subgraph "Configuration Changes"
+        A[Initial Value: 30]
+        B[Changed to: 60]
+        C[Changed to: 120]
+        D[Changed to: 180]
+    end
+    
+    subgraph "Interface Behaviors"
+        E[IOptions]
+        F[IOptionsSnapshot]
+        G[IOptionsMonitor]
+    end
+    
+    A --> E
+    B --> F
+    C --> G
+    D --> G
+    
+    style E fill:#ffcccc
+    style F fill:#ccffcc
+    style G fill:#cce5ff
+```
+
+## Interface Characteristics
+
+| Interface | Update Trigger | Value Changes | Use Case |
+|-----------|----------------|---------------|-----------|
+| `IOptions` | Application restart | Never during runtime | Static configuration |
+| `IOptionsSnapshot` | New request | Per request | Request-scoped changes |
+| `IOptionsMonitor` | Real-time | Immediate, even mid-request | Dynamic configuration |
+
+## Key Observations
+
+1. **IOptions<T>**
+   - Values remain constant during runtime
+   - Requires application restart to reflect changes
+   - Most memory-efficient for static configuration
+
+2. **IOptionsSnapshot<T>**
+   - Updates values with each new request
+   - Maintains consistent values within a single request
+   - Good for request-level configuration
+
+3. **IOptionsMonitor<T>**
+   - Detects changes in real-time
+   - Can update values during request execution
+   - Best for dynamic configuration requirements
+
+## Best Practices
+
+1. **Choose Based on Requirements**
+   - Use `IOptions` for static values (most common)
+   - Use `IOptionsSnapshot` for per-request consistency
+   - Use `IOptionsMonitor` for real-time updates
+
+2. **Performance Considerations**
+   - `IOptions` has lowest overhead
+   - `IOptionsSnapshot` creates new instance per request
+   - `IOptionsMonitor` maintains change tracking
+
+3. **Testing Scenarios**
+   - Consider adding delays to test dynamic updates
+   - Verify behavior across multiple requests
+   - Test mid-request configuration changes
+
+---
+
+Remember: For most applications, `IOptions<T>` is sufficient. Only use `IOptionsSnapshot` or `IOptionsMonitor` when you specifically need their dynamic update capabilities.
